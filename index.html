@@ -114,6 +114,13 @@
   .wheel-item:hover{ background: rgba(255,255,255,.1); transform: translateY(-1px); }
   .wheel-item .name{ font-weight:700; }
   .wheel-item .count{ font-size:.78rem; color:var(--rose); opacity:.9; }
+  .icon-btn{
+    font-size:.95rem;
+    cursor:pointer;
+    opacity:.8;
+    padding:.15rem;
+  }
+  .icon-btn:hover{ opacity:1; }
 
   button{
     font-family:'Quicksand', sans-serif;
@@ -321,11 +328,12 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>Crear nueva rueda</h2>
+    <div class="card" id="wheelFormCard">
+      <h2 id="formTitle">Crear nueva rueda</h2>
       <input id="newWheelName" type="text" placeholder="Nombre (ej. Comida)">
       <textarea id="newWheelOptions" rows="3" placeholder="Opciones separadas por coma o por línea. Opcional: 'Pizza:3' para que salga más seguido"></textarea>
       <button class="btn-gold" id="createWheelBtn" style="width:100%;">Guardar rueda</button>
+      <span class="back-link" id="cancelEditLink" style="display:none; margin-top:.6rem;">cancelar edición</span>
     </div>
 
     <div class="card">
@@ -511,8 +519,27 @@
       const w = wheelsData[id];
       const el = document.createElement('div');
       el.className = 'wheel-item';
-      el.innerHTML = `<span class="name">${escapeHtml(w.name)}</span><span class="count">${(w.options||[]).length} opciones</span>`;
-      el.addEventListener('click', ()=> openWheel(id));
+      el.innerHTML = `
+        <span class="name">${escapeHtml(w.name)}</span>
+        <span style="display:flex; align-items:center; gap:.6rem;">
+          <span class="count">${(w.options||[]).length} opciones</span>
+          <span class="icon-btn" data-action="edit" title="Editar">✏️</span>
+          <span class="icon-btn" data-action="delete" title="Eliminar">🗑️</span>
+        </span>`;
+      el.addEventListener('click', (e)=>{
+        const action = e.target.closest('[data-action]');
+        if(action && action.dataset.action === 'edit'){
+          e.stopPropagation();
+          startEditWheel(id);
+          return;
+        }
+        if(action && action.dataset.action === 'delete'){
+          e.stopPropagation();
+          deleteWheel(id, w.name);
+          return;
+        }
+        openWheel(id);
+      });
       wheelList.appendChild(el);
     });
   }
@@ -523,10 +550,43 @@
     return d.innerHTML;
   }
 
-  // ---------- crear rueda ----------
-  document.getElementById('createWheelBtn').addEventListener('click', ()=>{
-    const nameInput = document.getElementById('newWheelName');
-    const optionsInput = document.getElementById('newWheelOptions');
+  // ---------- crear / editar rueda ----------
+  let editingWheelId = null;
+  const nameInput = document.getElementById('newWheelName');
+  const optionsInput = document.getElementById('newWheelOptions');
+  const createWheelBtn = document.getElementById('createWheelBtn');
+  const formTitle = document.getElementById('formTitle');
+  const cancelEditLink = document.getElementById('cancelEditLink');
+
+  function startEditWheel(id){
+    editingWheelId = id;
+    const w = wheelsData[id];
+    nameInput.value = w.name;
+    optionsInput.value = (w.options || []).join(', ');
+    createWheelBtn.textContent = 'Guardar cambios';
+    formTitle.textContent = 'Editar rueda';
+    cancelEditLink.style.display = 'inline-block';
+    document.getElementById('wheelFormCard')?.scrollIntoView({ behavior:'smooth', block:'center' });
+  }
+
+  function resetWheelForm(){
+    editingWheelId = null;
+    nameInput.value = '';
+    optionsInput.value = '';
+    createWheelBtn.textContent = 'Guardar rueda';
+    formTitle.textContent = 'Crear nueva rueda';
+    cancelEditLink.style.display = 'none';
+  }
+
+  cancelEditLink.addEventListener('click', resetWheelForm);
+
+  function deleteWheel(id, name){
+    if(!confirm(`¿Eliminar la rueda "${name}"? Esto no se puede deshacer.`)) return;
+    set(ref(db, 'wheels/' + id), null);
+    if(editingWheelId === id) resetWheelForm();
+  }
+
+  createWheelBtn.addEventListener('click', ()=>{
     const name = nameInput.value.trim();
     const options = optionsInput.value
       .split(/[,\n]/)
@@ -538,15 +598,24 @@
       return;
     }
 
-    const newRef = push(wheelsRef);
-    set(newRef, {
-      name, options,
-      createdAt: Date.now(),
-      createdBy: currentPerson || 'anónimo'
-    });
+    if(editingWheelId){
+      set(ref(db, 'wheels/' + editingWheelId), {
+        name, options,
+        createdAt: wheelsData[editingWheelId].createdAt || Date.now(),
+        createdBy: wheelsData[editingWheelId].createdBy || (currentPerson || 'anónimo'),
+        updatedAt: Date.now(),
+        updatedBy: currentPerson || 'anónimo'
+      });
+    } else {
+      const newRef = push(wheelsRef);
+      set(newRef, {
+        name, options,
+        createdAt: Date.now(),
+        createdBy: currentPerson || 'anónimo'
+      });
+    }
 
-    nameInput.value = '';
-    optionsInput.value = '';
+    resetWheelForm();
   });
 
   // ---------- abrir / cerrar rueda ----------
