@@ -67,6 +67,15 @@
     font-size:.8rem;
     font-weight:600;
     cursor:pointer;
+    transition: border-color .3s ease, box-shadow .3s ease;
+  }
+  .person-badge.is-albieri{
+    border-color: var(--rose);
+    box-shadow: 0 0 12px rgba(143,224,255,.35);
+  }
+  .person-badge.is-tati{
+    border-color: var(--red);
+    box-shadow: 0 0 12px rgba(255,90,110,.35);
   }
 
   .card{
@@ -315,7 +324,7 @@
     <div class="card">
       <h2>Crear nueva rueda</h2>
       <input id="newWheelName" type="text" placeholder="Nombre (ej. Comida)">
-      <textarea id="newWheelOptions" rows="3" placeholder="Opciones separadas por coma o por línea"></textarea>
+      <textarea id="newWheelOptions" rows="3" placeholder="Opciones separadas por coma o por línea. Opcional: 'Pizza:3' para que salga más seguido"></textarea>
       <button class="btn-gold" id="createWheelBtn" style="width:100%;">Guardar rueda</button>
     </div>
 
@@ -340,6 +349,12 @@
       <div class="spin-row">
         <button class="btn-gold" id="spinBtn">Girar 🎡</button>
       </div>
+      <div style="text-align:center; margin-top:.6rem;">
+        <span class="back-link" id="statsToggle" style="margin-bottom:0;">Ver estadísticas 📊</span>
+      </div>
+      <div id="statsPanel" style="display:none; margin-top:.8rem;">
+        <div class="history-list" id="statsList"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -349,6 +364,7 @@
   <div>
     <div class="tag">salió</div>
     <h2 id="resultText">—</h2>
+    <p id="resultPhrase" style="color:#d6f2ff; margin-top:1rem; font-size:1rem;"></p>
   </div>
 </div>
 
@@ -366,7 +382,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
   import {
-    getDatabase, ref, push, set, onValue, query, orderByChild, limitToLast
+    getDatabase, ref, push, set, onValue, query, orderByChild, limitToLast, equalTo
   } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js";
 
   const firebaseConfig = {
@@ -422,6 +438,9 @@
 
   function applyPersonBadge(){
     personBadge.textContent = currentPerson ? ('👤 ' + currentPerson) : '👤 ...';
+    personBadge.classList.remove('is-albieri','is-tati');
+    if(currentPerson === 'Albieri') personBadge.classList.add('is-albieri');
+    if(currentPerson === 'Tati') personBadge.classList.add('is-tati');
   }
 
   if(currentPerson){
@@ -541,12 +560,38 @@
     drawWheel(activeOptions);
     listStage.style.display = 'none';
     wheelStage.classList.add('active');
+    document.getElementById('statsPanel').style.display = 'none';
+    document.getElementById('statsToggle').textContent = 'Ver estadísticas 📊';
   }
 
   document.getElementById('backLink').addEventListener('click', ()=>{
     wheelStage.classList.remove('active');
     listStage.style.display = 'block';
   });
+
+  // ---------- pesos: parsear "Opcion:peso" ----------
+  function parseOption(raw){
+    const idx = raw.lastIndexOf(':');
+    if(idx > 0){
+      const w = parseFloat(raw.slice(idx+1));
+      if(!isNaN(w) && w > 0){
+        return { label: raw.slice(0, idx).trim(), weight: w };
+      }
+    }
+    return { label: raw.trim(), weight: 1 };
+  }
+
+  function getSegments(options){
+    const parsed = options.map(parseOption);
+    const total = parsed.reduce((s,p)=> s + p.weight, 0);
+    let acc = 0;
+    return parsed.map(p=>{
+      const startDeg = (acc/total)*360;
+      acc += p.weight;
+      const endDeg = (acc/total)*360;
+      return { label: p.label, weight: p.weight, startDeg, endDeg };
+    });
+  }
 
   // ---------- dibujar rueda ----------
   const palette = ['#3aa7d9', '#f5b942', '#0f5c8c', '#8fe0ff', '#ffd97a', '#1f7fae'];
@@ -556,14 +601,13 @@
     const ctx = canvas.getContext('2d');
     const size = canvas.width;
     const cx = size/2, cy = size/2, r = size/2 - 6;
-    const n = options.length;
-    const segAngle = (Math.PI*2) / n;
+    const segments = getSegments(options);
 
     ctx.clearRect(0,0,size,size);
 
-    for(let i=0;i<n;i++){
-      const start = -Math.PI/2 + i*segAngle;
-      const end = start + segAngle;
+    segments.forEach((seg, i)=>{
+      const start = -Math.PI/2 + seg.startDeg*Math.PI/180;
+      const end = -Math.PI/2 + seg.endDeg*Math.PI/180;
       ctx.beginPath();
       ctx.moveTo(cx,cy);
       ctx.arc(cx,cy,r,start,end);
@@ -577,30 +621,50 @@
       // texto
       ctx.save();
       ctx.translate(cx,cy);
-      ctx.rotate(start + segAngle/2);
+      ctx.rotate((start+end)/2);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#062a44';
-      ctx.font = '600 ' + Math.max(14, size*0.032) + 'px Quicksand, sans-serif';
-      const label = options[i].length > 16 ? options[i].slice(0,14)+'…' : options[i];
+      ctx.font = '600 ' + Math.max(13, size*0.03) + 'px Quicksand, sans-serif';
+      const label = seg.label.length > 16 ? seg.label.slice(0,14)+'…' : seg.label;
       ctx.fillText(label, r - 18, 6);
       ctx.restore();
-    }
+    });
   }
+
+  // ---------- frases random al caer ----------
+  const resultPhrases = [
+    "¡El destino ha hablado! 🎉",
+    "Nada de quejas, ya salió 😏",
+    "¡Vamos con todo! 💙",
+    "Esta vez no hay vuelta atrás 🦒",
+    "La rueda nunca miente ✨",
+    "Y así se decidió el universo",
+    "Cero arrepentimientos permitidos 😄"
+  ];
 
   // ---------- girar ----------
   document.getElementById('spinBtn').addEventListener('click', ()=>{
     if(spinning || activeOptions.length === 0) return;
     spinning = true;
 
-    const n = activeOptions.length;
-    const segAngle = 360/n;
-    const resultIndex = Math.floor(Math.random()*n);
+    const segments = getSegments(activeOptions);
+    const totalWeight = segments.reduce((s,seg)=> s + seg.weight, 0);
+    let pick = Math.random()*totalWeight;
+    let chosen = segments[segments.length-1];
+    let cumulative = 0;
+    for(const seg of segments){
+      cumulative += seg.weight;
+      if(pick <= cumulative){ chosen = seg; break; }
+    }
 
-    const neededMod = (360 - (resultIndex*segAngle + segAngle/2) + 360) % 360;
+    const segAngleSize = chosen.endDeg - chosen.startDeg;
+    const center = (chosen.startDeg + chosen.endDeg)/2;
+
+    const neededMod = (360 - center + 360) % 360;
     const currentMod = ((currentRotation % 360) + 360) % 360;
     const delta = ((neededMod - currentMod) + 360) % 360;
     const extraSpins = 4 + Math.floor(Math.random()*3); // 4 a 6 vueltas extra
-    const jitter = (Math.random()-0.5) * (segAngle*0.6);
+    const jitter = (Math.random()-0.5) * (segAngleSize*0.6);
 
     currentRotation = currentRotation + delta + 360*extraSpins + jitter;
 
@@ -610,16 +674,17 @@
 
     setTimeout(()=>{
       spinning = false;
-      const result = activeOptions[resultIndex];
-      showResult(result);
-      recordSpin(result);
+      showResult(chosen.label);
+      recordSpin(chosen.label);
     }, 3250);
   });
 
   function showResult(text){
     const overlay = document.getElementById('resultOverlay');
     const resultText = document.getElementById('resultText');
+    const resultPhrase = document.getElementById('resultPhrase');
     resultText.textContent = text;
+    resultPhrase.textContent = resultPhrases[Math.floor(Math.random()*resultPhrases.length)];
     overlay.classList.add('show');
     setTimeout(()=>{
       overlay.classList.remove('show');
@@ -636,6 +701,42 @@
       ts: Date.now(),
       by: currentPerson || 'anónimo'
     });
+  }
+
+  // ---------- estadísticas por rueda ----------
+  const statsToggle = document.getElementById('statsToggle');
+  const statsPanel = document.getElementById('statsPanel');
+  const statsList = document.getElementById('statsList');
+
+  statsToggle.addEventListener('click', ()=>{
+    const willShow = statsPanel.style.display === 'none';
+    statsPanel.style.display = willShow ? 'block' : 'none';
+    statsToggle.textContent = willShow ? 'Ocultar estadísticas 📊' : 'Ver estadísticas 📊';
+    if(willShow) loadStats();
+  });
+
+  function loadStats(){
+    statsList.innerHTML = '<div class="empty-hint">Cargando...</div>';
+    const statsQuery = query(ref(db, 'history'), orderByChild('wheelId'), equalTo(activeWheelId));
+    onValue(statsQuery, (snapshot)=>{
+      const val = snapshot.val();
+      if(!val){
+        statsList.innerHTML = '<div class="empty-hint">Aún no hay giros en esta rueda</div>';
+        return;
+      }
+      const counts = {};
+      Object.values(val).forEach(item=>{
+        counts[item.result] = (counts[item.result] || 0) + 1;
+      });
+      const sorted = Object.entries(counts).sort((a,b)=> b[1]-a[1]);
+      statsList.innerHTML = '';
+      sorted.forEach(([label, count])=>{
+        const el = document.createElement('div');
+        el.className = 'history-item';
+        el.innerHTML = `<span>${escapeHtml(label)}</span><span class="when">${count} ${count===1?'vez':'veces'}</span>`;
+        statsList.appendChild(el);
+      });
+    }, { onlyOnce:true });
   }
 
   // ---------- historial en vivo ----------
